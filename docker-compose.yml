@@ -1,0 +1,261 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    hostname: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    networks:
+      - clickstream-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    hostname: kafka
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+    healthcheck:
+      test: [ "CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:29092" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - clickstream-network
+
+  spark-master:
+    image: apache/spark:3.5.0-python3
+    hostname: spark-master
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./src:/opt/spark/work-dir/src
+      - ./config:/opt/spark/work-dir/config
+      - ./logs:/opt/spark/work-dir/logs
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    networks:
+      - clickstream-network
+
+  spark-worker:
+    image: apache/spark:3.5.0-python3
+    hostname: spark-worker
+    container_name: spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2G
+      - SPARK_WORKER_CORES=2
+    volumes:
+      - ./src:/opt/spark/work-dir/src
+      - ./config:/opt/spark/work-dir/config
+      - ./logs:/opt/spark/work-dir/logs
+    depends_on:
+      - spark-master
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    networks:
+      - clickstream-network
+
+  postgres:
+    image: postgres:14
+    hostname: postgres
+    container_name: postgres
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+      # Create analytics database on startup
+      POSTGRES_MULTIPLE_DATABASES: analytics
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-db-volume:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - clickstream-network
+
+  airflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-init
+    depends_on:
+      - postgres
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'iEF8A2rvwQYUrwRgmHl7HM3Q_-imPTHl6Tnn6MTq-48='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
+      AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+      _AIRFLOW_DB_MIGRATE: 'true'
+    volumes:
+      - ./src/batch:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        airflow db migrate
+    networks:
+      - clickstream-network
+
+  airflow-webserver:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-webserver
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_started
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'iEF8A2rvwQYUrwRgmHl7HM3Q_-imPTHl6Tnn6MTq-48='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+      AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
+      AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+    volumes:
+      - ./src/batch:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./src:/opt/airflow/src
+    ports:
+      - "8081:8080"
+    command: api-server
+    restart: always
+    networks:
+      - clickstream-network
+
+  airflow-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_started
+      postgres:
+        condition: service_started
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'iEF8A2rvwQYUrwRgmHl7HM3Q_-imPTHl6Tnn6MTq-48='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
+      AIRFLOW__CORE__INTERNAL_API_URL: http://airflow-webserver:8080
+      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
+      AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+    volumes:
+      - ./src/batch:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./src:/opt/airflow/src
+    command: scheduler
+    restart: always
+    networks:
+      - clickstream-network
+
+  airflow-triggerer:
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    container_name: airflow-triggerer
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      airflow-webserver:
+        condition: service_started
+      postgres:
+        condition: service_started
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'iEF8A2rvwQYUrwRgmHl7HM3Q_-imPTHl6Tnn6MTq-48='
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
+      AIRFLOW__CORE__INTERNAL_API_URL: http://airflow-webserver:8080
+      AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+    volumes:
+      - ./src/batch:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./config:/opt/airflow/config
+      - ./src:/opt/airflow/src
+    command: triggerer
+    restart: always
+    networks:
+      - clickstream-network
+
+  simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile.simulator
+    container_name: simulator
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: clickstream-events
+      SIMULATOR_INTERVAL: "0.1"
+      RAW_LOGS_PATH: /app/logs/clickstream
+    volumes:
+      - ./src:/app/src
+      - ./config:/app/config
+      - ./logs:/app/logs
+    networks:
+      - clickstream-network
+    restart: unless-stopped
+
+  streaming:
+    build:
+      context: .
+      dockerfile: Dockerfile.streaming
+    container_name: streaming
+    depends_on:
+      - kafka
+      - spark-master
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: clickstream-events
+      SPARK_MASTER: spark://spark-master:7077
+      PYTHONPATH: /opt/spark/work-dir
+    volumes:
+      - ./src:/opt/spark/work-dir/src
+      - ./config:/opt/spark/work-dir/config
+      - ./logs:/opt/spark/work-dir/logs
+      - ./data:/opt/spark/work-dir/data
+    networks:
+      - clickstream-network
+    restart: unless-stopped
+
+networks:
+  clickstream-network:
+    driver: bridge
+
+volumes:
+  postgres-db-volume:
