@@ -1,0 +1,20 @@
+FROM apache/spark:3.5.0-python3
+
+USER root
+
+WORKDIR /opt/spark/work-dir
+
+# Install Python dependencies
+RUN pip install --no-cache-dir kafka-python python-dotenv
+
+# Copy source code
+COPY src/ ./src/
+COPY config/ ./config/
+
+# Set Python path
+ENV PYTHONPATH=/opt/spark/work-dir
+
+# Run streaming consumer
+CMD ["/opt/spark/bin/spark-submit", \
+     "--packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0", \
+     "/opt/spark/work-dir/src/streaming/spark_consumer.py"]

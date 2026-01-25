@@ -1,0 +1,28 @@
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir kafka-python python-dotenv
+
+# Copy source code
+COPY src/ ./src/
+COPY config/ ./config/
+
+# Create logs directory
+RUN mkdir -p /app/logs/clickstream
+
+# Set Python path and logs path
+ENV PYTHONPATH=/app
+ENV RAW_LOGS_PATH=/app/logs/clickstream
+
+# Run simulator
+CMD ["python", "-m", "src.simulator.event_generator"]
