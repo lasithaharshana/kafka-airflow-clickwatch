@@ -107,6 +107,10 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
       AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
       AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+      AIRFLOW__CORE__AUTH_MANAGER: 'airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: 'true'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: 'admin:Admin'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: '/opt/airflow/config/simple_auth_manager_passwords.json'
       _AIRFLOW_DB_MIGRATE: 'true'
     volumes:
       - ./src/batch:/opt/airflow/dags
@@ -138,6 +142,10 @@ services:
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
       AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
       AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+      AIRFLOW__CORE__AUTH_MANAGER: 'airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: 'true'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: 'admin:Admin'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: '/opt/airflow/config/simple_auth_manager_passwords.json'
     volumes:
       - ./src/batch:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -171,6 +179,10 @@ services:
       AIRFLOW__CORE__INTERNAL_API_URL: http://airflow-webserver:8080
       AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-webserver:8080/execution/
       AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+      AIRFLOW__CORE__AUTH_MANAGER: 'airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: 'true'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: 'admin:Admin'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: '/opt/airflow/config/simple_auth_manager_passwords.json'
     volumes:
       - ./src/batch:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
@@ -201,6 +213,10 @@ services:
       AIRFLOW__LOGGING__EXPOSE_CONFIG: 'false'
       AIRFLOW__CORE__INTERNAL_API_URL: http://airflow-webserver:8080
       AIRFLOW__API_AUTH__JWT_SECRET: 'yvJd2I3dHzLP2Riw38IyaqwiDmIMn4bgOh27FFM59ec'
+      AIRFLOW__CORE__AUTH_MANAGER: 'airflow.api_fastapi.auth.managers.simple.simple_auth_manager.SimpleAuthManager'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: 'true'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: 'admin:Admin'
+      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: '/opt/airflow/config/simple_auth_manager_passwords.json'
     volumes:
       - ./src/batch:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
