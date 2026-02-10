@@ -1,328 +1,347 @@
-# E-commerce Clickstream Analytics Platform
+# E-Commerce Clickstream Analytics Pipeline
 
-A comprehensive real-time and batch processing system for e-commerce clickstream analytics using Kafka, Spark, and Airflow.
+A lambda architecture implementation for real-time and batch clickstream analytics, built with Apache Kafka, Spark Structured Streaming, Apache Airflow, and PostgreSQL.
 
-## 🏗️ Architecture
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/downloads/)
+[![Apache Kafka](https://img.shields.io/badge/Kafka-7.5.0-black.svg)](https://kafka.apache.org/)
+[![Apache Spark](https://img.shields.io/badge/Spark-3.5.0-orange.svg)](https://spark.apache.org/)
+[![Apache Airflow](https://img.shields.io/badge/Airflow-3.1.6-017CEE.svg)](https://airflow.apache.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://docs.docker.com/compose/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This project implements a modern data engineering pipeline with the following components:
+---
+
+## Table of Contents
+
+- [Architecture Overview](#architecture-overview)
+- [System Components](#system-components)
+- [Technology Stack](#technology-stack)
+- [Prerequisites](#prerequisites)
+- [Getting Started](#getting-started)
+- [Web Interfaces](#web-interfaces)
+- [Project Structure](#project-structure)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+- [Author](#author)
+
+---
+
+## Architecture Overview
+
+This project implements a **lambda architecture** consisting of a speed layer for real-time flash sale detection and a batch layer for daily user segmentation and analytics.
 
 ```
-┌──────────────┐     ┌───────┐     ┌──────────────┐     ┌─────────────┐
-│  Event       │────▶│ Kafka │────▶│    Spark     │────▶│   Alerts    │
-│  Simulator   │     │       │     │  Streaming   │     │ (Flash Sale)│
-└──────────────┘     └───┬───┘     └──────────────┘     └─────────────┘
-                         │
-                         │
-                    ┌────▼────┐     ┌──────────────┐     ┌─────────────┐
-                    │  Logs   │────▶│   Airflow    │────▶│   Email/    │
-                    │  Store  │     │    Batch     │     │   Summary   │
-                    └─────────┘     └──────────────┘     └─────────────┘
+                        ┌──────────────────────────────────────────────────────┐
+                        │                   SPEED LAYER                        │
+                        │                                                      │
+┌──────────────┐        │   ┌───────────┐     ┌────────────────┐               │
+│   Event      │───────▶│   │   Kafka   │────▶│ Spark Streaming│──▶ Flash Sale │
+│  Simulator   │        │   │  Broker   │     │  (10-min window)│    Alerts    │
+│              │        │   └─────┬─────┘     └───────┬────────┘               │
+└──────────────┘        │         │                   │                         │
+                        │         │                   ▼                         │
+                        │         │            Parquet Files                    │
+                        └─────────┼────────────────────────────────────────────┘
+                                  │
+                        ┌─────────┼────────────────────────────────────────────┐
+                        │         ▼           BATCH LAYER                      │
+                        │   ┌───────────┐     ┌────────────────┐               │
+                        │   │   JSONL   │────▶│    Airflow     │──▶ Daily      │
+                        │   │   Logs    │     │  (Daily 2 AM)  │   Reports     │
+                        │   └───────────┘     └───────┬────────┘               │
+                        │                             │                        │
+                        │                             ▼                        │
+                        │                      ┌─────────────┐                 │
+                        │                      │  PostgreSQL  │                │
+                        │                      │  Analytics   │                │
+                        │                      └─────────────┘                 │
+                        └──────────────────────────────────────────────────────┘
 ```
 
-### Components
+## System Components
 
-1. **Event Simulator**: Generates realistic e-commerce clickstream events
-   - User interactions: view, add_to_cart, purchase
-   - Publishes to Kafka topic
+### 1. Event Simulator
 
-2. **Streaming Analytics** (Spark Structured Streaming):
-   - 10-minute sliding window aggregation
-   - Tracks views and purchases per product
-   - Flash sale alerts when views > 100 and purchases < 5
+Generates realistic e-commerce clickstream events and publishes them to Kafka in real time.
 
-3. **Batch Processing** (Airflow):
-   - Daily user segmentation: Window Shoppers vs Buyers
-   - Top 5 viewed products report
-   - Email/text summary generation
+- **Event types**: `view` (70%), `add_to_cart` (20%), `purchase` (10%)
+- **Product categories**: Smartphones, Laptops, Tablets, Headphones, Smartwatches, Cameras, Gaming, Accessories
+- **Default parameters**: 1,000 users, 100 products, 0.1s interval
+- **Dual output**: Kafka topic and daily JSONL log files (`clickstream_YYYY-MM-DD.jsonl`)
 
-## 🚀 Quick Start
+### 2. Speed Layer — Spark Structured Streaming
 
-### Prerequisites
+Consumes events from Kafka in real time and applies windowed aggregation to detect flash sale opportunities.
 
-- Docker and Docker Compose
-- Python 3.8+
+- **Window**: 10-minute sliding window with 5-minute slide interval
+- **Flash sale alert condition**: `views > 100` AND `purchases < 5` (high interest, low conversion)
+- **Output sinks**: Console alerts (30s trigger) and Parquet files (60s trigger)
+
+### 3. Batch Layer — Apache Airflow
+
+Orchestrates daily batch processing via a scheduled DAG.
+
+- **DAG**: `clickstream_daily_batch` — runs daily at 02:00 UTC
+- **User segmentation**:
+  - **Buyers**: Users with at least one purchase event
+  - **Window Shoppers**: Users with views or cart additions but no purchases
+- **Analytics**: Top 5 viewed products, conversion rates by category
+- **Storage**: JSON summary reports and PostgreSQL analytics database
+
+### 4. Serving Layer — PostgreSQL
+
+Stores structured analytics results for downstream consumption.
+
+| Table | Description |
+|-------|-------------|
+| `daily_summary` | Aggregate metrics per day (events, buyer/shopper counts, buyer rate) |
+| `user_segments` | Per-user segment classification (buyer or window_shopper) |
+| `product_performance` | Top viewed products with rank |
+| `category_conversion` | Category-level views, purchases, and conversion rates |
+| `flash_sale_alerts` | Detected flash sale events from the streaming layer |
+
+---
+
+## Technology Stack
+
+| Component | Technology | Version |
+|-----------|-----------|---------|
+| Message Broker | Apache Kafka (Confluent) | 7.5.0 |
+| Cluster Coordination | Apache ZooKeeper | 7.5.0 |
+| Stream Processing | Apache Spark Structured Streaming | 3.5.0 |
+| Batch Orchestration | Apache Airflow | 3.1.6 |
+| Analytics Database | PostgreSQL | 14 |
+| Columnar Storage | Apache Parquet | — |
+| Containerization | Docker Compose | v2 |
+| Language | Python | 3.12 (Airflow), 3.9 (Simulator) |
+
+---
+
+## Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
 - Git
+- Minimum 8 GB RAM recommended (multiple JVM-based services)
 
-### Installation
+---
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/lasithaharshana/biodata.git
-   cd biodata
-   ```
+## Getting Started
 
-2. **Set up environment variables**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-3. **Start all services with Docker Compose**
-   ```bash
-   docker-compose up -d
-   ```
-
-   This will start:
-   - Zookeeper (port 2181)
-   - Kafka (port 9092)
-   - Spark Master (port 8080)
-   - Spark Worker
-   - PostgreSQL (port 5432)
-   - Airflow Webserver (port 8081)
-   - Airflow Scheduler
-   - Event Simulator
-   - Streaming Consumer
-
-4. **Verify services are running**
-   ```bash
-   docker-compose ps
-   ```
-
-### Access Web UIs
-
-- **Spark Master UI**: http://localhost:8080
-- **Airflow UI**: http://localhost:8081
-  - Username: `airflow`
-  - Password: `airflow`
-
-## 📊 Usage
-
-### Running Locally (Development)
-
-1. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **Run the Event Simulator**
-   ```bash
-   python -m src.simulator.event_generator
-   ```
-
-3. **Run Spark Streaming Consumer**
-   ```bash
-   spark-submit \
-     --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 \
-     src/streaming/spark_consumer.py
-   ```
-
-4. **Run Batch Processing**
-   ```bash
-   python -m src.batch.user_segmentation
-   ```
-
-### Configuration
-
-Edit the `.env` file or environment variables:
+### 1. Clone the Repository
 
 ```bash
-# Kafka
-KAFKA_BOOTSTRAP_SERVERS=localhost:9092
-KAFKA_TOPIC=clickstream-events
-
-# Alert Thresholds
-VIEWS_THRESHOLD=100
-PURCHASES_THRESHOLD=5
-
-# Simulator
-SIMULATOR_INTERVAL=0.1
-NUM_USERS=1000
-NUM_PRODUCTS=100
+git clone https://github.com/lasithaharshana/kafka-airflow-clickwatch.git
+cd kafka-airflow-clickwatch
 ```
 
-## 🧪 Testing
+### 2. Start All Services
 
-### Run all tests
 ```bash
+docker compose up -d
+```
+
+This launches the following services:
+
+| Service | Container | Port |
+|---------|-----------|------|
+| ZooKeeper | `zookeeper` | 2181 |
+| Kafka Broker | `kafka` | 9092 |
+| Spark Master | `spark-master` | 8080, 7077 |
+| Spark Worker | `spark-worker` | — |
+| PostgreSQL | `postgres` | 5432 |
+| Airflow Webserver | `airflow-webserver` | 8081 |
+| Airflow Scheduler | `airflow-scheduler` | — |
+| Airflow Triggerer | `airflow-triggerer` | — |
+| Event Simulator | `simulator` | — |
+| Streaming Consumer | `streaming` | — |
+
+### 3. Verify Services
+
+```bash
+docker compose ps
+```
+
+### 4. View Real-Time Streaming Alerts
+
+```bash
+docker compose logs -f streaming
+```
+
+### 5. Stop All Services
+
+```bash
+docker compose down
+```
+
+To also remove persistent data volumes:
+
+```bash
+docker compose down -v
+```
+
+---
+
+## Web Interfaces
+
+### Apache Airflow
+
+| | |
+|------|-------|
+| **URL** | http://localhost:8081 |
+| **Username** | `admin` |
+| **Password** | `admin` |
+
+Airflow uses the **Simple Auth Manager**. Credentials are stored in `config/simple_auth_manager_passwords.json`. To change the password, edit that file and restart the webserver:
+
+```bash
+docker compose restart airflow-webserver
+```
+
+### Spark Master UI
+
+| | |
+|------|-------|
+| **URL** | http://localhost:8080 |
+| **Auth** | None required |
+
+---
+
+## Project Structure
+
+```
+kafka-airflow-clickwatch/
+├── config/
+│   ├── __init__.py
+│   ├── config.py                          # Centralized configuration (env-var driven)
+│   └── simple_auth_manager_passwords.json # Airflow login credentials
+├── src/
+│   ├── simulator/
+│   │   ├── __init__.py
+│   │   └── event_generator.py             # Clickstream event producer
+│   ├── streaming/
+│   │   ├── __init__.py
+│   │   └── spark_consumer.py              # Spark Structured Streaming consumer
+│   └── batch/
+│       ├── __init__.py
+│       ├── airflow_dag.py                 # Airflow DAG definition
+│       ├── user_segmentation.py           # User segmentation & analytics
+│       └── postgres_storage.py            # PostgreSQL analytics storage
+├── tests/
+│   ├── test_simulator/
+│   │   └── test_event_generator.py
+│   └── test_batch/
+│       └── test_user_segmentation.py
+├── data/
+│   └── parquet/                           # Streaming parquet output
+├── logs/
+│   └── clickstream/                       # Daily JSONL event logs
+├── docker-compose.yml                     # Service orchestration
+├── Dockerfile.airflow                     # Airflow image (slim-3.1.6-python3.12)
+├── Dockerfile.simulator                   # Simulator image (python:3.9-slim)
+├── Dockerfile.streaming                   # Streaming image (spark:3.5.0-python3)
+├── init-db.sql                            # PostgreSQL schema initialization
+├── requirements.txt                       # Python dependencies
+├── setup.py                               # Package configuration
+├── pyproject.toml                         # Tool configuration (black, isort, pytest)
+└── README.md
+```
+
+---
+
+## Configuration
+
+All configuration is managed through environment variables with sensible defaults defined in `config/config.py`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker address |
+| `KAFKA_TOPIC` | `clickstream-events` | Kafka topic name |
+| `SPARK_MASTER` | `local[*]` | Spark master URL |
+| `WINDOW_DURATION` | `10 minutes` | Streaming aggregation window |
+| `SLIDE_DURATION` | `5 minutes` | Window slide interval |
+| `VIEWS_THRESHOLD` | `100` | Flash sale: minimum views |
+| `PURCHASES_THRESHOLD` | `5` | Flash sale: maximum purchases |
+| `SIMULATOR_INTERVAL` | `0.1` | Seconds between generated events |
+| `NUM_USERS` | `1000` | Number of simulated users |
+| `NUM_PRODUCTS` | `100` | Number of simulated products |
+
+Docker Compose overrides these defaults for inter-container communication (e.g., `kafka:29092` for internal broker access).
+
+---
+
+## Testing
+
+### Run All Tests
+
+```bash
+pip install -r requirements.txt
 pytest
 ```
 
-### Run with coverage
+### Run with Coverage Report
+
 ```bash
-pytest --cov=src --cov-report=html
+pytest --cov=src --cov-report=html --cov-report=term
 ```
 
-### Run specific test modules
+### Run Specific Test Modules
+
 ```bash
 pytest tests/test_simulator/
 pytest tests/test_batch/
 ```
 
-## 🎨 Code Quality
+---
 
-### Format code
+## Troubleshooting
+
+### Kafka Connection Issues
+
 ```bash
-black src/ tests/ config/
-isort src/ tests/ config/
+docker compose ps kafka
+docker compose logs kafka
 ```
 
-### Lint code
+Ensure Kafka has fully started before the simulator and streaming services connect. The health check is configured with a 30-second start period.
+
+### Spark Streaming Not Processing
+
 ```bash
-flake8 src/ tests/ config/
+docker compose logs streaming
 ```
 
-### Run pre-commit hooks
+Check the Spark Master UI at http://localhost:8080 to verify the worker is registered and the application is running.
+
+### Airflow DAG Not Visible
+
 ```bash
-pre-commit install
-pre-commit run --all-files
+docker compose logs airflow-scheduler
 ```
 
-## 📁 Project Structure
+Ensure the DAG file is properly mounted to `/opt/airflow/dags` and is not paused in the Airflow UI.
 
-```
-.
-├── config/                 # Configuration files
-│   ├── __init__.py
-│   └── config.py
-├── src/                    # Source code
-│   ├── simulator/          # Event generator
-│   │   ├── __init__.py
-│   │   └── event_generator.py
-│   ├── streaming/          # Spark streaming consumer
-│   │   ├── __init__.py
-│   │   └── spark_consumer.py
-│   └── batch/              # Airflow batch processing
-│       ├── __init__.py
-│       ├── airflow_dag.py
-│       └── user_segmentation.py
-├── tests/                  # Test files
-│   ├── test_simulator/
-│   └── test_batch/
-├── logs/                   # Log files
-├── data/                   # Data storage
-├── docker-compose.yml      # Docker orchestration
-├── Dockerfile.simulator    # Simulator container
-├── Dockerfile.streaming    # Streaming container
-├── requirements.txt        # Python dependencies
-├── setup.py                # Package setup
-├── pyproject.toml          # Tool configurations
-├── .pre-commit-config.yaml # Pre-commit hooks
-├── .flake8                 # Flake8 configuration
-├── .gitignore              # Git ignore rules
-└── README.md               # This file
+### Airflow Login Issues
+
+Credentials: **admin / admin**. If login fails, verify the password file is mounted correctly:
+
+```bash
+docker compose exec airflow-webserver cat /opt/airflow/config/simple_auth_manager_passwords.json
 ```
 
-## 🔧 Development
+### PostgreSQL Connection
 
-### Setting up Development Environment
-
-1. **Create virtual environment**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-2. **Install development dependencies**
-   ```bash
-   pip install -e ".[dev]"
-   ```
-
-3. **Install pre-commit hooks**
-   ```bash
-   pre-commit install
-   ```
-
-### Adding New Features
-
-1. Create a new branch
-2. Write tests first (TDD approach)
-3. Implement the feature
-4. Ensure all tests pass
-5. Run linting and formatting
-6. Create a pull request
-
-## 📈 Monitoring and Alerts
-
-### Streaming Alerts
-
-The Spark streaming consumer monitors for flash sale opportunities:
-- **Condition**: Views > 100 AND Purchases < 5 in a 10-minute window
-- **Output**: Console logs with product details
-
-Example alert:
-```
-+-------------------+-------------------+-----------+------+---------+
-|window_start       |window_end         |product_id |views |purchases|
-+-------------------+-------------------+-----------+------+---------+
-|2024-01-01 10:00:00|2024-01-01 10:10:00|product_42 |150   |3        |
-+-------------------+-------------------+-----------+------+---------+
+```bash
+docker compose exec postgres psql -U airflow -d analytics -c "\dt"
 ```
 
-### Batch Reports
+---
 
-Daily summaries include:
-- Total events processed
-- User segmentation (Buyers vs Window Shoppers)
-- Top 5 viewed products
-- Generated at timestamp
-
-## 🐳 Docker Services
-
-### Simulator Service
-Continuously generates clickstream events and publishes to Kafka.
-
-### Streaming Service
-Spark application that consumes from Kafka and generates alerts.
-
-### Airflow Services
-- **Webserver**: Web UI for managing DAGs
-- **Scheduler**: Schedules and triggers DAG runs
-- **Init**: Initializes database and creates admin user
-
-## 🔐 Security
-
-⚠️ **IMPORTANT SECURITY NOTICE**: This project uses Apache Airflow 2.10.4 which has a known **HIGH severity vulnerability** (proxy credentials leak) that **CANNOT be fixed** with currently available versions. The patched version (3.1.6) does not exist yet.
-
-**Options**:
-1. Accept the risk (mitigations applied) - see [SECURITY.md](SECURITY.md)
-2. Do not use the Airflow batch component until 3.1.6 is released
-3. Use alternative batch scheduler (see documentation)
-
-**Other Security Measures**:
-- 4 out of 5 critical Airflow CVEs fixed (latest stable version)
-- Secrets managed via environment variables
-- No hardcoded credentials
-- Docker network isolation
-- Regular dependency security scans in CI
-- Security configuration hardening applied
-
-**For full details**, see [SECURITY.md](SECURITY.md)
-
-## 📝 License
+## License
 
 This project is licensed under the MIT License.
 
-## 👥 Contributing
+## Author
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 🐛 Troubleshooting
-
-### Kafka Connection Issues
-- Ensure Kafka is running: `docker-compose ps kafka`
-- Check Kafka logs: `docker-compose logs kafka`
-- Verify network connectivity: `docker network inspect clickstream-network`
-
-### Spark Streaming Issues
-- Check Spark Master UI: http://localhost:8080
-- View streaming logs: `docker-compose logs streaming`
-- Verify checkpoint directory permissions
-
-### Airflow Issues
-- Access Airflow UI: http://localhost:8081
-- Check scheduler logs: `docker-compose logs airflow-scheduler`
-- Verify DAG is not paused in the UI
-
-## 📚 Additional Resources
-
-- [Apache Kafka Documentation](https://kafka.apache.org/documentation/)
-- [Apache Spark Structured Streaming](https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html)
-- [Apache Airflow Documentation](https://airflow.apache.org/docs/)
-
-## 📞 Support
-
-For issues, questions, or contributions, please open an issue on GitHub.
+**Lasitha Harshana** — [GitHub](https://github.com/lasithaharshana)
